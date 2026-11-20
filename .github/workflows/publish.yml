@@ -1,0 +1,37 @@
+# NouFlix ka public APK: har 30 minute dekhta hai ke naya build aaya ya nahi.
+# Naya ho to hisse jor kar (sha256 check) yahan Release bana deta hai. Koi secret/token nahi chahiye.
+name: Publish latest NouFlix APK
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Naya version ho to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          curl -fsSL "https://nouflix-dl.pages.dev/latest.json?$(date +%s)" -o latest.json
+          V=$(python3 -c "import json;print(json.load(open('latest.json'))['version'])")
+          if gh release view "v$V" -R "$REPO" >/dev/null 2>&1; then echo "v$V pehle se hai"; exit 0; fi
+          python3 - <<'PY'
+          import hashlib, json, urllib.request
+          j = json.load(open("latest.json"))
+          names = {"arm64-v8a": "NouFlix.apk", "armeabi-v7a": "NouFlix-old-phones.apk"}
+          for abi, parts in j["files"].items():
+              data = b"".join(urllib.request.urlopen("https://nouflix-dl.pages.dev/" + p).read() for p in parts)
+              assert hashlib.sha256(data).hexdigest() == j["sha256"][abi], abi + " kharab download"
+              open(names[abi], "wb").write(data)
+          PY
+          gh release create "v$V" NouFlix.apk NouFlix-old-phones.apk -R "$REPO" --latest \
+            --title "NouFlix (version $V)" \
+            --notes "Download NouFlix.apk and open it to install. Older phones: NouFlix-old-phones.apk"
